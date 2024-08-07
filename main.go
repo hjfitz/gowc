@@ -4,63 +4,90 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"os"
-	"sync"
+	"strings"
+	"unicode/utf8"
 )
 
+type Flags struct {
+	dbytes *bool
+	dlines *bool
+	dchars *bool
+	dwords *bool
+}
+
 func main() {
-	//dbytes := flag.Bool("c", false, "The number of bytes in each input is written to the standard output.")
-	dlines := flag.Bool("l", false, "The number of lines in each input file is written to the standard output.")
-	//dchars := flag.Bool("m", false, "The number of characters in each input file is written to the standard output. If the current locale does not support multbyte characters, this is equivalent to the -c option.")
-	//dwords := flag.Bool("w", false, "The number of words in each input file is written to the standard output.")
+	flags := Flags{}
+	flag.BoolVar(flags.dbytes, "c", false, "The number of bytes in each input is written to the standard output.")
+	flag.BoolVar(flags.dlines, "l", false, "The number of lines in each input file is written to the standard output.")
+	flag.BoolVar(flags.dchars, "m", false, "The number of characters in each input file is written to the standard output. If the current locale does not support multbyte characters, this is equivalent to the -c option.")
+	flag.BoolVar(flags.dwords, "w", false, "The number of words in each input file is written to the standard output.")
 	flag.Parse()
-	fname := flag.Args()[0]
 
-	fmt.Printf("    ")
+	for _, fname := range flag.Args() {
+		wc(&flags, &fname)
+	}
+}
 
-	if *dlines {
-		lcount := glines(fname)
-		fmt.Printf("%d ", lcount)
+func wc(flags *Flags, fname *string) {
+	scn, file := stream_lines(fname)
+	defer file.Close()
+
+	tlines := int64(0)
+	twords := int64(0)
+	tbytes := int64(0)
+	tchars := int64(0)
+
+	for scn.Scan() {
+		chk := scn.Text()
+
+		words := strings.Fields(chk)
+		twords += int64(len(words))
+
+		tlines += int64(1)
+
+		tbytes += int64(len(chk))
+
+		tchars += int64(utf8.RuneCountInString(chk))
+
 	}
 
-	fmt.Printf("%s\n", fname)
+	// account to chunks being newlines
+	tbytes += tlines
+	tchars += tlines
+
+	fmt.Printf("   ")
+	if *flags.dbytes {
+		fmt.Printf("%d    ", tbytes)
+	}
+
+	if *flags.dlines {
+		fmt.Printf("%d    ", tlines)
+	}
+
+	if *flags.dchars {
+		fmt.Printf("%d    ", tchars)
+	}
+
+	if *flags.dwords {
+		fmt.Printf("%d ", twords)
+	}
+
+	fmt.Printf("%s\n", *fname)
 }
 
-func glines(fname string) int64 {
-	var lines int64
-	lines = 0
-	var wg sync.WaitGroup
-	wg.Add(1)
-	stream(fname, func(chunk string, err error) {
-		if err == io.EOF {
-			wg.Done()
-			return
-		}
-		// by default, bufio will scan to each newline, so we just sum the lines
-		lines += int64(1)
-	})
-	wg.Wait()
-
-	return lines
-}
-
-func stream(fname string, cb func(c string, e error)) {
-	file, err := os.Open(fname)
+func stream_lines(fname *string) (*bufio.Scanner, *os.File) {
+	file, err := os.Open(*fname)
 
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 
-	for scanner.Scan() {
-		chk := scanner.Text()
-		cb(chk, nil)
-	}
-	cb("", io.EOF)
+	return scanner, file
+
 }
